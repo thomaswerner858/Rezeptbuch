@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Dish } from '../types';
-import { Share2, X, ChevronDown, BookOpen } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Dish } from '../types.ts';
+import { X, BookOpen } from 'lucide-react';
 
 interface MatchOverlayProps {
   dish: Dish;

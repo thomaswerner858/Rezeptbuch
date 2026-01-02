@@ -1,6 +1,7 @@
+
 import React from 'react';
-import { Plus, User as UserIcon } from 'lucide-react';
-import { User } from '../types';
+import { Plus } from 'lucide-react';
+import { User } from '../types.ts';
 
 interface HeaderProps {
   currentUser: User;
@@ -14,7 +15,6 @@ const Header: React.FC<HeaderProps> = ({ currentUser, allUsers, onSwitchUser, on
 
   return (
     <header className="px-4 py-4 flex items-center justify-between bg-slate-900 border-b border-slate-800 z-[50]">
-      {/* User Switcher (Simulating login) */}
       <button 
         onClick={() => onSwitchUser(otherUser.id)}
         className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-full text-sm font-medium transition-colors border border-slate-700"

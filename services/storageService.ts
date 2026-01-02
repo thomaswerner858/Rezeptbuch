@@ -1,8 +1,9 @@
 
-import { Dish, Vote, User } from '../types';
-import { INITIAL_DISHES, STORAGE_KEYS, DRIVE_PROXY_URL } from '../constants';
+import { Dish, Vote, User } from '../types.ts';
+import { INITIAL_DISHES, STORAGE_KEYS, DRIVE_PROXY_URL } from '../constants.ts';
 
 const isToday = (timestamp: number) => {
+  if (!timestamp || isNaN(timestamp)) return false;
   const date = new Date(timestamp);
   const today = new Date();
   return (
@@ -18,7 +19,7 @@ const compressImage = (base64Str: string): Promise<string> => {
     img.src = base64Str;
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      const MAX_WIDTH = 800; // Etwas größer für Drive
+      const MAX_WIDTH = 800;
       let width = img.width;
       let height = img.height;
       if (width > MAX_WIDTH) {
@@ -31,27 +32,33 @@ const compressImage = (base64Str: string): Promise<string> => {
       ctx?.drawImage(img, 0, 0, width, height);
       resolve(canvas.toDataURL('image/jpeg', 0.8));
     };
+    img.onerror = () => resolve(base64Str);
   });
 };
 
 export const storageService = {
   getDishes: (): Dish[] => {
-    const stored = localStorage.getItem(STORAGE_KEYS.DISHES);
-    if (!stored) {
-      localStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(INITIAL_DISHES));
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.DISHES);
+      if (!stored) {
+        localStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(INITIAL_DISHES));
+        return INITIAL_DISHES;
+      }
+      return JSON.parse(stored);
+    } catch (e) {
+      console.error("Fehler beim Lesen der Gerichte:", e);
       return INITIAL_DISHES;
     }
-    return JSON.parse(stored);
   },
 
   uploadToDrive: async (imageBase64: string, filename: string): Promise<string> => {
-    if (!DRIVE_PROXY_URL || DRIVE_PROXY_URL.includes("YOUR_APPS_SCRIPT_URL")) {
-      console.warn("Google Drive Proxy URL nicht gesetzt. Speichere nur lokal.");
-      return imageBase64;
+    if (!DRIVE_PROXY_URL || DRIVE_PROXY_URL.includes("macros/s/")) {
+       // URL scheint okay zu sein, fahre fort
+    } else {
+       return imageBase64;
     }
 
     try {
-      // Wir nutzen text/plain, um CORS-Preflight-Probleme mit Apps Script zu vermeiden
       await fetch(DRIVE_PROXY_URL, {
         method: 'POST',
         mode: 'no-cors', 
@@ -62,8 +69,6 @@ export const storageService = {
           imageBase64
         })
       });
-      
-      console.log('Upload-Anfrage an Google Drive gesendet.');
       return imageBase64; 
     } catch (error) {
       console.error('Drive Upload Fehler:', error);
@@ -73,11 +78,10 @@ export const storageService = {
 
   addDish: async (name: string, recipe?: string, imageBase64?: string): Promise<Dish> => {
     const dishes = storageService.getDishes();
-    let finalImageUrl = `https://picsum.photos/seed/${name.replace(/\s/g, '')}/600/800`;
+    let finalImageUrl = `https://picsum.photos/seed/${encodeURIComponent(name)}/600/800`;
     
     if (imageBase64) {
       const compressed = await compressImage(imageBase64);
-      // Hintergrund-Upload zu Drive
       storageService.uploadToDrive(compressed, `${Date.now()}_${name.replace(/\s/g, '_')}.jpg`);
       finalImageUrl = compressed;
     }
@@ -96,29 +100,41 @@ export const storageService = {
   },
 
   getVotes: (): Vote[] => {
-    const lastActive = localStorage.getItem(STORAGE_KEYS.LAST_ACTIVE);
-    const now = Date.now();
-    if (lastActive && !isToday(parseInt(lastActive))) {
-      localStorage.setItem(STORAGE_KEYS.VOTES, JSON.stringify([]));
+    try {
+      const lastActiveStr = localStorage.getItem(STORAGE_KEYS.LAST_ACTIVE);
+      const now = Date.now();
+      
+      if (lastActiveStr) {
+        const lastActive = parseInt(lastActiveStr);
+        if (!isNaN(lastActive) && !isToday(lastActive)) {
+          localStorage.setItem(STORAGE_KEYS.VOTES, JSON.stringify([]));
+          localStorage.setItem(STORAGE_KEYS.LAST_ACTIVE, now.toString());
+          return [];
+        }
+      }
+      
       localStorage.setItem(STORAGE_KEYS.LAST_ACTIVE, now.toString());
+      const stored = localStorage.getItem(STORAGE_KEYS.VOTES);
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
       return [];
     }
-    localStorage.setItem(STORAGE_KEYS.LAST_ACTIVE, now.toString());
-    const stored = localStorage.getItem(STORAGE_KEYS.VOTES);
-    return stored ? JSON.parse(stored) : [];
   },
 
   castVote: (userId: string, dishId: string, liked: boolean) => {
-    const votes = storageService.getVotes();
-    const filtered = votes.filter(v => !(v.userId === userId && v.dishId === dishId));
-    const newVote: Vote = { userId, dishId, liked, timestamp: Date.now() };
-    localStorage.setItem(STORAGE_KEYS.VOTES, JSON.stringify([...filtered, newVote]));
+    try {
+      const votes = storageService.getVotes();
+      const filtered = votes.filter(v => !(v.userId === userId && v.dishId === dishId));
+      const newVote: Vote = { userId, dishId, liked, timestamp: Date.now() };
+      localStorage.setItem(STORAGE_KEYS.VOTES, JSON.stringify([...filtered, newVote]));
+    } catch (e) {}
   },
 
   checkForMatch: (dishId: string): boolean => {
     const votes = storageService.getVotes();
     const dishVotes = votes.filter(v => v.dishId === dishId && v.liked);
-    return new Set(dishVotes.map(v => v.userId)).size >= 2;
+    const usersWhoLiked = new Set(dishVotes.map(v => v.userId));
+    return usersWhoLiked.size >= 2;
   },
 
   getQueueForUser: (userId: string): Dish[] => {

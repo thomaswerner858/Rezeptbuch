@@ -2,16 +2,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 
-import { USERS } from './constants';
-import { Dish, SwipeDirection, User } from './types';
-import { storageService } from './services/storageService';
+import { USERS } from './constants.ts';
+import { Dish, SwipeDirection, User } from './types.ts';
+import { storageService } from './services/storageService.ts';
 
-import Header from './components/Header';
-import SwipeCard, { SwipeCardHandle } from './components/SwipeCard';
-import ActionButtons from './components/ActionButtons';
-import MatchOverlay from './components/MatchOverlay';
-import AddDishModal from './components/AddDishModal';
-import NoMatchView from './components/NoMatchView';
+import Header from './components/Header.tsx';
+import SwipeCard, { SwipeCardHandle } from './components/SwipeCard.tsx';
+import ActionButtons from './components/ActionButtons.tsx';
+import MatchOverlay from './components/MatchOverlay.tsx';
+import AddDishModal from './components/AddDishModal.tsx';
+import NoMatchView from './components/NoMatchView.tsx';
 
 function App() {
   const [currentUser, setCurrentUser] = useState<User>(USERS[0]);
@@ -24,8 +24,13 @@ function App() {
   const topCardRef = useRef<SwipeCardHandle>(null);
 
   const refreshQueue = useCallback(() => {
-    const dishes = storageService.getQueueForUser(currentUser.id);
-    setQueue(dishes);
+    try {
+      const dishes = storageService.getQueueForUser(currentUser.id);
+      setQueue(dishes);
+    } catch (err) {
+      console.error("Fehler beim Laden der Queue:", err);
+      setQueue([]);
+    }
   }, [currentUser.id]);
 
   useEffect(() => {
