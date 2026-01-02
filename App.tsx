@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
 
 import { USERS } from './constants';
@@ -12,9 +12,13 @@ import ActionButtons from './components/ActionButtons';
 import MatchOverlay from './components/MatchOverlay';
 import AddDishModal from './components/AddDishModal';
 import NoMatchView from './components/NoMatchView';
+import MatchesList from './components/MatchesList';
+
+type View = 'swipe' | 'matches';
 
 function App() {
   const [currentUser, setCurrentUser] = useState<User>(USERS[0]);
+  const [currentView, setCurrentView] = useState<View>('swipe');
   const [queue, setQueue] = useState<Dish[]>([]);
   const [matchedDish, setMatchedDish] = useState<Dish | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -37,6 +41,12 @@ function App() {
     refreshQueue();
     setLoading(false);
   }, [currentUser, refreshQueue]);
+
+  // All matches for the badge and the matches view
+  const matches = useMemo(() => {
+    const allDishes = storageService.getDishes();
+    return allDishes.filter(dish => storageService.checkForMatch(dish.id));
+  }, [queue, matchedDish]); // Recalculate when queue changes or a new match happens
 
   const handleSwipe = async (direction: SwipeDirection) => {
     if (queue.length === 0) return;
@@ -87,33 +97,44 @@ function App() {
         allUsers={USERS} 
         onSwitchUser={handleUserSwitch}
         onAddDish={() => setIsAddModalOpen(true)}
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        matchCount={matches.length}
       />
 
-      <main className="flex-grow relative w-full p-4 overflow-hidden flex flex-col">
-        <div className="relative flex-grow w-full">
-          {queue.length > 0 ? (
-            queue.map((dish, index) => (
-              <SwipeCard 
-                key={dish.id} 
-                ref={index === 0 ? topCardRef : null}
-                dish={dish} 
-                index={index} 
-                onSwipe={handleSwipe}
-              />
-            ))
-          ) : (
-            <NoMatchView />
-          )}
-        </div>
+      <main className="flex-grow relative w-full overflow-hidden flex flex-col">
+        {currentView === 'swipe' ? (
+          <div className="relative flex-grow w-full p-4">
+            <div className="relative h-full w-full">
+              {queue.length > 0 ? (
+                queue.map((dish, index) => (
+                  <SwipeCard 
+                    key={dish.id} 
+                    ref={index === 0 ? topCardRef : null}
+                    dish={dish} 
+                    index={index} 
+                    onSwipe={handleSwipe}
+                  />
+                ))
+              ) : (
+                <NoMatchView />
+              )}
+            </div>
+          </div>
+        ) : (
+          <MatchesList matches={matches} />
+        )}
       </main>
 
-      <div className="bg-slate-950 z-10">
-        <ActionButtons 
-          disabled={queue.length === 0 || isSwiping}
-          onDislike={() => handleButtonSwipe(SwipeDirection.LEFT)}
-          onLike={() => handleButtonSwipe(SwipeDirection.RIGHT)}
-        />
-      </div>
+      {currentView === 'swipe' && (
+        <div className="bg-slate-950 z-10">
+          <ActionButtons 
+            disabled={queue.length === 0 || isSwiping}
+            onDislike={() => handleButtonSwipe(SwipeDirection.LEFT)}
+            onLike={() => handleButtonSwipe(SwipeDirection.RIGHT)}
+          />
+        </div>
+      )}
 
       <AnimatePresence>
         {matchedDish && (
