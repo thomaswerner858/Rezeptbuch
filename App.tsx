@@ -29,7 +29,6 @@ function App() {
 
   const topCardRef = useRef<SwipeCardHandle>(null);
 
-  // Initialisierung: Nutzer aus LocalStorage laden
   useEffect(() => {
     const savedUserId = localStorage.getItem('dsm_active_user_id');
     if (savedUserId) {
@@ -97,8 +96,9 @@ function App() {
   };
 
   const handleAddDish = async (name: string, recipe?: string, imageBase64?: string) => {
-    const newDish = await storageService.addDish(name, recipe, imageBase64);
-    setQueue(prev => [newDish, ...prev]);
+    await storageService.addDish(name, recipe, imageBase64);
+    // Sofort synchronisieren, damit das neue Gericht geladen wird
+    await performSync();
   };
 
   if (loading) return (
@@ -108,7 +108,6 @@ function App() {
     </div>
   );
 
-  // Onboarding / User Selection Screen
   if (!currentUser) {
     return (
       <div className="flex flex-col h-screen w-full max-w-md mx-auto bg-slate-950 items-center justify-center p-8">

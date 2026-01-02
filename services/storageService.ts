@@ -21,34 +21,39 @@ const safeString = (val: any, fallback: string = ''): string => {
 };
 
 /**
- * Upload via Google Apps Script (Zentraler Speicher)
+ * Upload via Google Apps Script
+ * Schickt das Bild an dein Skript und versucht die öffentliche URL zu erhalten.
  */
 const uploadToGoogleDrive = async (name: string, base64Image: string): Promise<string> => {
   try {
     const response = await fetch(GOOGLE_CONFIG.GAS_URL, {
       method: 'POST',
-      // Wir senden das Bild an das Skript. 
-      // Damit beide die URL erhalten, sollte das Skript die Web-URL des Bildes zurückgeben.
+      mode: 'cors', // Wir brauchen die Antwort-URL!
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8', // GAS kommt oft besser mit text/plain klar
+      },
       body: JSON.stringify({
-        filename: `${name}_${Date.now()}.jpg`,
+        filename: `${name.replace(/\s+/g, '_')}_${Date.now()}.jpg`,
         mimeType: 'image/jpeg',
         data: base64Image.split(',')[1]
       }),
     });
     
-    // Falls das Skript CORS unterstützt, versuchen wir die URL zu lesen
     const result = await response.json();
+    console.log("GAS Response:", result);
+    // Dein Script sollte ein Objekt wie { "url": "..." } zurückgeben
     return result.url || result.link || base64Image;
   } catch (e) {
-    // Falls das Skript im 'no-cors' Modus läuft oder kein JSON liefert:
-    // Wir nutzen das Base64 als Fallback für die lokale Session.
+    console.warn("GAS Upload Error (evtl. CORS?):", e);
+    // Fallback: Wenn wir die URL nicht lesen können, nutzen wir das Base64 (lokal sichtbar)
     return base64Image; 
   }
 };
 
 const airtableFetch = async (tableName: string, options: RequestInit = {}) => {
   if (!AIRTABLE_CONFIG.TOKEN || AIRTABLE_CONFIG.TOKEN.includes('HIER_EINTRAGEN')) {
-    throw new Error("Bitte Airtable Token eintragen");
+    console.warn("Airtable Token fehlt! Daten werden nur lokal gespeichert.");
+    return { records: [] };
   }
 
   const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.BASE_ID}/${tableName}`;
@@ -60,6 +65,12 @@ const airtableFetch = async (tableName: string, options: RequestInit = {}) => {
       ...options.headers,
     },
   });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`Airtable Error: ${error.error?.message || response.statusText}`);
+  }
+  
   return response.json();
 };
 
@@ -72,22 +83,20 @@ export const storageService = {
 
   sync: async (): Promise<{ dishes: Dish[], votes: Vote[] }> => {
     try {
-      // 1. Hole alle Gerichte von Airtable
       const dishesData = await airtableFetch(AIRTABLE_CONFIG.TABLES.DISHES);
       const remoteDishes: Dish[] = (dishesData.records || []).map((r: any) => ({
         id: safeString(r.fields.id || r.id),
         name: safeString(r.fields.name, "Unbekanntes Gericht"),
         recipe: safeString(r.fields.recipe),
         imageUrl: safeString(r.fields.imageUrl, `https://picsum.photos/seed/${r.id}/600/800`),
-        isCustom: !!r.fields.isCustom
-      })).reverse(); // Neueste oben
+        isCustom: r.fields.isCustom === "true" || r.fields.isCustom === true
+      })).reverse();
 
-      // 2. Hole alle Stimmen von Airtable
       const votesData = await airtableFetch(AIRTABLE_CONFIG.TABLES.VOTES);
       const remoteVotes: Vote[] = (votesData.records || []).map((r: any) => ({
         userId: safeString(r.fields.userId),
         dishId: safeString(r.fields.dishId),
-        liked: !!r.fields.liked,
+        liked: r.fields.liked === "true" || r.fields.liked === true,
         timestamp: Number(r.fields.timestamp) || Date.now()
       })).filter((v: any) => v.userId && v.dishId);
 
@@ -96,7 +105,7 @@ export const storageService = {
 
       return { dishes: remoteDishes, votes: remoteVotes };
     } catch (err) {
-      console.error("Sync failed, using cache", err);
+      console.error("Sync failed:", err);
       return { dishes: storageService.getDishes(), votes: storageService.getVotes() };
     }
   },
@@ -107,22 +116,19 @@ export const storageService = {
     let finalImageUrl = `https://picsum.photos/seed/${encodeURIComponent(name + Date.now())}/600/800`;
     
     if (imageBase64) {
+      // 1. Bild zu Google Drive hochladen und echte URL holen
       finalImageUrl = await uploadToGoogleDrive(name, imageBase64);
     }
 
     const newDish: Dish = {
-      id: Date.now().toString(),
+      id: "dish_" + Date.now().toString(),
       name: safeString(name),
       recipe: safeString(recipe),
       imageUrl: finalImageUrl,
       isCustom: true,
     };
 
-    // Sofort lokal speichern für schnelles UI-Feedback
-    const dishes = storageService.getDishes();
-    storageService._saveToLocal(STORAGE_KEYS.DISHES, [newDish, ...dishes]);
-
-    // An Airtable senden, damit es der andere User beim nächsten Sync sieht
+    // 2. An Airtable senden für den Partner
     try {
       await airtableFetch(AIRTABLE_CONFIG.TABLES.DISHES, {
         method: 'POST',
@@ -133,14 +139,19 @@ export const storageService = {
               name: newDish.name,
               recipe: newDish.recipe || "",
               imageUrl: newDish.imageUrl,
-              isCustom: true
+              isCustom: true // Als boolean senden
             }
           }]
         })
       });
+      console.log("Erfolgreich an Airtable gesendet");
     } catch (e) {
-      console.error("Airtable push failed", e);
+      console.error("Airtable Upload fehlgeschlagen:", e);
     }
+
+    // 3. Lokal hinzufügen
+    const dishes = storageService.getDishes();
+    storageService._saveToLocal(STORAGE_KEYS.DISHES, [newDish, ...dishes]);
 
     return newDish;
   },
@@ -150,7 +161,6 @@ export const storageService = {
     const lastActiveStr = localStorage.getItem(STORAGE_KEYS.LAST_ACTIVE);
     const now = Date.now();
     
-    // Reset der Stimmen, wenn der letzte Zugriff nicht heute war
     if (lastActiveStr) {
       const lastActive = parseInt(lastActiveStr);
       if (!isNaN(lastActive) && !isToday(lastActive)) {
@@ -192,7 +202,6 @@ export const storageService = {
   checkForMatch: (dishId: string): boolean => {
     const votes = storageService.getVotes();
     const dishVotes = votes.filter(v => v.dishId === dishId && v.liked);
-    // Ein Match liegt vor, wenn mindestens 2 verschiedene User 'liked' haben
     const uniqueUsers = new Set(dishVotes.map(v => v.userId));
     return uniqueUsers.size >= 2;
   },
@@ -201,7 +210,6 @@ export const storageService = {
     const allDishes = storageService.getDishes();
     const votes = storageService.getVotes();
     const userVotedDishIds = new Set(votes.filter(v => v.userId === userId).map(v => v.dishId));
-    // Zeige nur Gerichte, die der User noch nicht bewertet hat
     return allDishes.filter(d => !userVotedDishIds.has(d.id));
   }
 };
