@@ -2,16 +2,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 
-import { USERS } from './constants.ts';
-import { Dish, SwipeDirection, User } from './types.ts';
-import { storageService } from './services/storageService.ts';
+import { USERS } from './constants';
+import { Dish, SwipeDirection, User } from './types';
+import { storageService } from './services/storageService';
 
-import Header from './components/Header.tsx';
-import SwipeCard, { SwipeCardHandle } from './components/SwipeCard.tsx';
-import ActionButtons from './components/ActionButtons.tsx';
-import MatchOverlay from './components/MatchOverlay.tsx';
-import AddDishModal from './components/AddDishModal.tsx';
-import NoMatchView from './components/NoMatchView.tsx';
+import Header from './components/Header';
+import SwipeCard, { SwipeCardHandle } from './components/SwipeCard';
+import ActionButtons from './components/ActionButtons';
+import MatchOverlay from './components/MatchOverlay';
+import AddDishModal from './components/AddDishModal';
+import NoMatchView from './components/NoMatchView';
 
 function App() {
   const [currentUser, setCurrentUser] = useState<User>(USERS[0]);
@@ -80,7 +80,7 @@ function App() {
   if (loading) return <div className="flex h-screen items-center justify-center bg-slate-950 text-white">Laden...</div>;
 
   return (
-    <div className="flex flex-col h-full w-full max-w-md mx-auto bg-slate-950 relative shadow-2xl overflow-hidden border-x border-slate-900">
+    <div className="flex flex-col h-screen w-full max-w-md mx-auto bg-slate-950 relative shadow-2xl overflow-hidden border-x border-slate-900">
       
       <Header 
         currentUser={currentUser} 

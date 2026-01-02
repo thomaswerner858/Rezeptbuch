@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Plus } from 'lucide-react';
-import { User } from '../types.ts';
+import { User } from '../types';
 
 interface HeaderProps {
   currentUser: User;

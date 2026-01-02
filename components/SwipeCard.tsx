@@ -1,7 +1,7 @@
 
 import React, { useRef, useImperativeHandle, forwardRef } from 'react';
 import { motion, useMotionValue, useTransform, useAnimation, PanInfo } from 'framer-motion';
-import { Dish, SwipeDirection } from '../types.ts';
+import { Dish, SwipeDirection } from '../types';
 
 interface SwipeCardProps {
   dish: Dish;

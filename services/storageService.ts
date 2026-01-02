@@ -1,6 +1,6 @@
 
-import { Dish, Vote, User } from '../types.ts';
-import { INITIAL_DISHES, STORAGE_KEYS, DRIVE_PROXY_URL } from '../constants.ts';
+import { Dish, Vote, User } from '../types';
+import { INITIAL_DISHES, STORAGE_KEYS, DRIVE_PROXY_URL } from '../constants';
 
 const isToday = (timestamp: number) => {
   if (!timestamp || isNaN(timestamp)) return false;
@@ -52,9 +52,7 @@ export const storageService = {
   },
 
   uploadToDrive: async (imageBase64: string, filename: string): Promise<string> => {
-    if (!DRIVE_PROXY_URL || DRIVE_PROXY_URL.includes("macros/s/")) {
-       // URL scheint okay zu sein, fahre fort
-    } else {
+    if (!DRIVE_PROXY_URL || !DRIVE_PROXY_URL.includes("macros/s/")) {
        return imageBase64;
     }
 

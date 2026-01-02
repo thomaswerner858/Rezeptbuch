@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Dish } from '../types.ts';
+import { Dish } from '../types';
 import { X, BookOpen } from 'lucide-react';
 
 interface MatchOverlayProps {
