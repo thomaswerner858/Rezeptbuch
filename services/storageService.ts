@@ -20,55 +20,30 @@ const safeString = (val: any, fallback: string = ''): string => {
   return String(val);
 };
 
-// Hilfsfunktion: Wandelt Base64 in ein Blob um (für Drive Upload)
-const base64ToBlob = (base64: string): Blob => {
-  const byteString = atob(base64.split(',')[1]);
-  const mimeString = base64.split(',')[0].split(':')[1].split(';')[0];
-  const ab = new ArrayBuffer(byteString.length);
-  const ia = new Uint8Array(ab);
-  for (let i = 0; i < byteString.length; i++) {
-    ia[i] = byteString.charCodeAt(i);
-  }
-  return new Blob([ab], { type: mimeString });
-};
-
 /**
- * Google Drive Upload Logik
+ * Upload via Google Apps Script (Zentraler Speicher)
  */
 const uploadToGoogleDrive = async (name: string, base64Image: string): Promise<string> => {
-  const token = localStorage.getItem(STORAGE_KEYS.GOOGLE_TOKEN);
-  if (!token) throw new Error("Nicht mit Google Drive verbunden. Bitte erst einloggen.");
-
-  const blob = base64ToBlob(base64Image);
-  const metadata = {
-    name: `${name}_${Date.now()}.jpg`,
-    mimeType: 'image/jpeg',
-    parents: [GOOGLE_CONFIG.FOLDER_ID] // Hier wird die Ordner-ID gesetzt
-  };
-
-  const form = new FormData();
-  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-  form.append('file', blob);
-
-  const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webContentLink', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}` },
-    body: form,
-  });
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      localStorage.removeItem(STORAGE_KEYS.GOOGLE_TOKEN);
-      throw new Error("Google Sitzung abgelaufen. Bitte erneut verbinden.");
-    }
-    const errorData = await response.json();
-    console.error("Drive API Error:", errorData);
-    throw new Error("Fehler beim Upload zu Google Drive");
+  try {
+    const response = await fetch(GOOGLE_CONFIG.GAS_URL, {
+      method: 'POST',
+      // Wir senden das Bild an das Skript. 
+      // Damit beide die URL erhalten, sollte das Skript die Web-URL des Bildes zurückgeben.
+      body: JSON.stringify({
+        filename: `${name}_${Date.now()}.jpg`,
+        mimeType: 'image/jpeg',
+        data: base64Image.split(',')[1]
+      }),
+    });
+    
+    // Falls das Skript CORS unterstützt, versuchen wir die URL zu lesen
+    const result = await response.json();
+    return result.url || result.link || base64Image;
+  } catch (e) {
+    // Falls das Skript im 'no-cors' Modus läuft oder kein JSON liefert:
+    // Wir nutzen das Base64 als Fallback für die lokale Session.
+    return base64Image; 
   }
-
-  const result = await response.json();
-  // Wir nutzen das Format für Drive-Bilder, das meistens direkt funktioniert
-  return `https://lh3.googleusercontent.com/u/0/d/${result.id}`;
 };
 
 const airtableFetch = async (tableName: string, options: RequestInit = {}) => {
@@ -97,6 +72,7 @@ export const storageService = {
 
   sync: async (): Promise<{ dishes: Dish[], votes: Vote[] }> => {
     try {
+      // 1. Hole alle Gerichte von Airtable
       const dishesData = await airtableFetch(AIRTABLE_CONFIG.TABLES.DISHES);
       const remoteDishes: Dish[] = (dishesData.records || []).map((r: any) => ({
         id: safeString(r.fields.id || r.id),
@@ -104,8 +80,9 @@ export const storageService = {
         recipe: safeString(r.fields.recipe),
         imageUrl: safeString(r.fields.imageUrl, `https://picsum.photos/seed/${r.id}/600/800`),
         isCustom: !!r.fields.isCustom
-      }));
+      })).reverse(); // Neueste oben
 
+      // 2. Hole alle Stimmen von Airtable
       const votesData = await airtableFetch(AIRTABLE_CONFIG.TABLES.VOTES);
       const remoteVotes: Vote[] = (votesData.records || []).map((r: any) => ({
         userId: safeString(r.fields.userId),
@@ -119,6 +96,7 @@ export const storageService = {
 
       return { dishes: remoteDishes, votes: remoteVotes };
     } catch (err) {
+      console.error("Sync failed, using cache", err);
       return { dishes: storageService.getDishes(), votes: storageService.getVotes() };
     }
   },
@@ -129,12 +107,7 @@ export const storageService = {
     let finalImageUrl = `https://picsum.photos/seed/${encodeURIComponent(name + Date.now())}/600/800`;
     
     if (imageBase64) {
-      try {
-        finalImageUrl = await uploadToGoogleDrive(name, imageBase64);
-      } catch (e) {
-        console.error("Drive Upload failed", e);
-        throw e;
-      }
+      finalImageUrl = await uploadToGoogleDrive(name, imageBase64);
     }
 
     const newDish: Dish = {
@@ -145,23 +118,29 @@ export const storageService = {
       isCustom: true,
     };
 
+    // Sofort lokal speichern für schnelles UI-Feedback
     const dishes = storageService.getDishes();
     storageService._saveToLocal(STORAGE_KEYS.DISHES, [newDish, ...dishes]);
 
-    await airtableFetch(AIRTABLE_CONFIG.TABLES.DISHES, {
-      method: 'POST',
-      body: JSON.stringify({
-        records: [{
-          fields: {
-            id: newDish.id,
-            name: newDish.name,
-            recipe: newDish.recipe || "",
-            imageUrl: newDish.imageUrl,
-            isCustom: true
-          }
-        }]
-      })
-    });
+    // An Airtable senden, damit es der andere User beim nächsten Sync sieht
+    try {
+      await airtableFetch(AIRTABLE_CONFIG.TABLES.DISHES, {
+        method: 'POST',
+        body: JSON.stringify({
+          records: [{
+            fields: {
+              id: newDish.id,
+              name: newDish.name,
+              recipe: newDish.recipe || "",
+              imageUrl: newDish.imageUrl,
+              isCustom: true
+            }
+          }]
+        })
+      });
+    } catch (e) {
+      console.error("Airtable push failed", e);
+    }
 
     return newDish;
   },
@@ -170,6 +149,8 @@ export const storageService = {
     const votes = storageService._readFromLocal(STORAGE_KEYS.VOTES, []);
     const lastActiveStr = localStorage.getItem(STORAGE_KEYS.LAST_ACTIVE);
     const now = Date.now();
+    
+    // Reset der Stimmen, wenn der letzte Zugriff nicht heute war
     if (lastActiveStr) {
       const lastActive = parseInt(lastActiveStr);
       if (!isNaN(lastActive) && !isToday(lastActive)) {
@@ -185,6 +166,7 @@ export const storageService = {
   castVote: async (userId: string, dishId: string, liked: boolean) => {
     const votes = storageService.getVotes();
     const newVote: Vote = { userId, dishId, liked, timestamp: Date.now() };
+    
     const updatedVotes = [...votes.filter(v => !(v.userId === userId && v.dishId === dishId)), newVote];
     storageService._saveToLocal(STORAGE_KEYS.VOTES, updatedVotes);
 
@@ -202,19 +184,24 @@ export const storageService = {
           }]
         })
       });
-    } catch (e) {}
+    } catch (e) {
+      console.error("Vote sync failed", e);
+    }
   },
 
   checkForMatch: (dishId: string): boolean => {
     const votes = storageService.getVotes();
     const dishVotes = votes.filter(v => v.dishId === dishId && v.liked);
-    return new Set(dishVotes.map(v => v.userId)).size >= 2;
+    // Ein Match liegt vor, wenn mindestens 2 verschiedene User 'liked' haben
+    const uniqueUsers = new Set(dishVotes.map(v => v.userId));
+    return uniqueUsers.size >= 2;
   },
 
   getQueueForUser: (userId: string): Dish[] => {
     const allDishes = storageService.getDishes();
     const votes = storageService.getVotes();
     const userVotedDishIds = new Set(votes.filter(v => v.userId === userId).map(v => v.dishId));
+    // Zeige nur Gerichte, die der User noch nicht bewertet hat
     return allDishes.filter(d => !userVotedDishIds.has(d.id));
   }
 };

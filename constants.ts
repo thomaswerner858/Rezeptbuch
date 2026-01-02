@@ -12,7 +12,6 @@ export const STORAGE_KEYS = {
   DISHES: 'dsm_dishes',
   VOTES: 'dsm_votes',
   LAST_ACTIVE: 'dsm_last_active',
-  GOOGLE_TOKEN: 'dsm_g_token',
 };
 
 export const AIRTABLE_CONFIG = {
@@ -25,12 +24,9 @@ export const AIRTABLE_CONFIG = {
 };
 
 /**
- * Google Drive Konfiguration
- * Um Bilder hochzuladen, benötigst du eine Client ID von der Google Cloud Console.
+ * Google Apps Script Konfiguration
+ * Ermöglicht den Upload ohne individuellen Nutzer-Login.
  */
 export const GOOGLE_CONFIG = {
-  CLIENT_ID: 'DEINE_GOOGLE_CLIENT_ID_HIER_EINTRAGEN',
-  SCOPES: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.install',
-  // Die spezifische Ordner-ID aus deinem Link
-  FOLDER_ID: '1RXJOS_hSk-HBcrJEOSEV7qKWv_mVIdMH',
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbxwDaozIoUyJAn8HgJWoeC8jtVippvj4KDt9sLj6bYuAEYYLXifXqn2XT6YMR9Ank3i/exec',
 };

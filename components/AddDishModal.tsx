@@ -1,13 +1,12 @@
 
-import React, { useState, useRef, useEffect } from 'react';
-import { X, Upload, Image as ImageIcon, Loader2, LogIn, AlertCircle } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { X, Upload, Image as ImageIcon, Loader2 } from 'lucide-react';
 import heic2any from 'heic2any';
-import { GOOGLE_CONFIG, STORAGE_KEYS } from '../constants';
 
 interface AddDishModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (name: string, recipe?: string, imageUrl?: string) => Promise<void>;
+  onSubmit: (name: string, recipe?: string, imageBase64?: string) => Promise<void>;
 }
 
 const AddDishModal: React.FC<AddDishModalProps> = ({ isOpen, onClose, onSubmit }) => {
@@ -16,23 +15,7 @@ const AddDishModal: React.FC<AddDishModalProps> = ({ isOpen, onClose, onSubmit }
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
-  const [isGoogleConnected, setIsGoogleConnected] = useState(!!localStorage.getItem(STORAGE_KEYS.GOOGLE_TOKEN));
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleGoogleLogin = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const client = (window as any).google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_CONFIG.CLIENT_ID,
-      scope: GOOGLE_CONFIG.SCOPES,
-      callback: (response: any) => {
-        if (response.access_token) {
-          localStorage.setItem(STORAGE_KEYS.GOOGLE_TOKEN, response.access_token);
-          setIsGoogleConnected(true);
-        }
-      },
-    });
-    client.requestAccessToken();
-  };
 
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -62,12 +45,6 @@ const AddDishModal: React.FC<AddDishModalProps> = ({ isOpen, onClose, onSubmit }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (imagePreview && !isGoogleConnected) {
-      // Wenn Bild gewählt aber nicht verbunden, Login triggern oder warnen
-      alert("Für das Hochladen von Fotos ist eine Verbindung zu Google Drive erforderlich.");
-      return;
-    }
-
     if (dishName.trim() && !isSubmitting && !isConverting) {
       setIsSubmitting(true);
       try {
@@ -129,24 +106,9 @@ const AddDishModal: React.FC<AddDishModalProps> = ({ isOpen, onClose, onSubmit }
               {imagePreview ? (
                 <>
                   <img src={imagePreview} className="w-full h-full object-cover" alt="Preview" />
-                  {!isGoogleConnected && (
-                    <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center animate-in fade-in">
-                      <AlertCircle className="text-amber-500 mb-3" size={32} />
-                      <p className="text-white font-bold mb-4 text-sm">Google Drive Verbindung nötig um Fotos zu speichern</p>
-                      <button 
-                        type="button" 
-                        onClick={handleGoogleLogin}
-                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-blue-900/40"
-                      >
-                        <LogIn size={18} /> Jetzt verbinden
-                      </button>
-                    </div>
-                  )}
-                  {isGoogleConnected && (
-                    <div className="absolute top-2 right-2 bg-green-500 text-white p-1 rounded-full shadow-lg">
-                      <Upload size={14} strokeWidth={3} />
-                    </div>
-                  )}
+                  <div className="absolute top-2 right-2 bg-blue-500 text-white p-1 rounded-full shadow-lg">
+                    <Upload size={14} strokeWidth={3} />
+                  </div>
                 </>
               ) : (
                 <div className="text-center p-4 group-hover:scale-105 transition-transform">
@@ -154,7 +116,7 @@ const AddDishModal: React.FC<AddDishModalProps> = ({ isOpen, onClose, onSubmit }
                     <ImageIcon className="text-slate-400" size={32} />
                   </div>
                   <p className="text-slate-400 font-bold">Foto hinzufügen</p>
-                  <p className="text-slate-500 text-xs mt-1">Optional (Google Drive)</p>
+                  <p className="text-slate-500 text-xs mt-1">Direkt-Upload aktiv</p>
                 </div>
               )}
               <input type="file" ref={fileInputRef} className="hidden" accept="image/*,.heic,.heif" onChange={handleImageChange} />
@@ -164,7 +126,7 @@ const AddDishModal: React.FC<AddDishModalProps> = ({ isOpen, onClose, onSubmit }
           <div className="pt-2">
             <button
               type="submit"
-              disabled={!dishName.trim() || isSubmitting || isConverting || (imagePreview && !isGoogleConnected)}
+              disabled={!dishName.trim() || isSubmitting || isConverting}
               className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xl hover:bg-blue-500 disabled:opacity-30 disabled:grayscale transition-all flex items-center justify-center gap-3 shadow-xl shadow-blue-900/20 active:scale-95"
             >
               {isSubmitting ? (
@@ -176,11 +138,6 @@ const AddDishModal: React.FC<AddDishModalProps> = ({ isOpen, onClose, onSubmit }
                 'REZEPT SPEICHERN'
               )}
             </button>
-            {imagePreview && !isGoogleConnected && (
-              <p className="text-center text-amber-500 text-[10px] font-bold uppercase tracking-wider mt-3">
-                Verbindung erforderlich für Foto-Upload
-              </p>
-            )}
           </div>
         </form>
       </div>
