@@ -1,7 +1,6 @@
 
 import { Dish, User } from './types';
 
-// Die Liste wurde geleert, damit du direkt mit deinen eigenen Test-Gerichten starten kannst.
 export const INITIAL_DISHES: Dish[] = [];
 
 export const USERS: User[] = [
@@ -15,6 +14,18 @@ export const STORAGE_KEYS = {
   LAST_ACTIVE: 'dsm_last_active',
 };
 
-// Die bereitgestellte Google Apps Script URL für den Drive-Upload
-export const DRIVE_PROXY_URL = "https://script.google.com/macros/s/AKfycbxwDaozIoUyJAn8HgJWoeC8jtVippvj4KDt9sLj6bYuAEYYLXifXqn2XT6YMR9Ank3i/exec";
-export const DRIVE_FOLDER_ID = "1RXJOS_hSk-HBcrJEOSEV7qKWv_mVIdMH";
+/**
+ * Airtable Konfiguration
+ * Trage hier deinen Token direkt ein. 
+ * Um den GitHub-Upload zu ermöglichen, musst du in den GitHub-Repository-Einstellungen 
+ * unter "Code security and analysis" die "Push Protection" für diesen Key deaktivieren 
+ * oder das Repository auf "Privat" stellen.
+ */
+export const AIRTABLE_CONFIG = {
+  BASE_ID: 'apprpI3Y3hphyJ0t4', 
+  TOKEN: 'DEIN_AIRTABLE_TOKEN_HIER_EINTRAGEN',
+  TABLES: {
+    DISHES: 'Dishes',
+    VOTES: 'Votes'
+  }
+};

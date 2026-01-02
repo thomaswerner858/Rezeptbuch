@@ -1,6 +1,6 @@
 
-import { Dish, Vote, User } from '../types';
-import { INITIAL_DISHES, STORAGE_KEYS, DRIVE_PROXY_URL } from '../constants';
+import { Dish, Vote } from '../types';
+import { INITIAL_DISHES, STORAGE_KEYS, AIRTABLE_CONFIG } from '../constants';
 
 const isToday = (timestamp: number) => {
   if (!timestamp || isNaN(timestamp)) return false;
@@ -13,9 +13,17 @@ const isToday = (timestamp: number) => {
   );
 };
 
+const safeString = (val: any, fallback: string = ''): string => {
+  if (val === null || val === undefined) return fallback;
+  if (Array.isArray(val)) return safeString(val[0], fallback);
+  if (typeof val === 'object') return JSON.stringify(val);
+  return String(val);
+};
+
 const compressImage = (base64Str: string): Promise<string> => {
   return new Promise((resolve) => {
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.src = base64Str;
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -29,103 +37,171 @@ const compressImage = (base64Str: string): Promise<string> => {
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
-      ctx?.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/jpeg', 0.8));
+      if (ctx) {
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      } else {
+        resolve(base64Str);
+      }
     };
     img.onerror = () => resolve(base64Str);
   });
 };
 
+const airtableFetch = async (tableName: string, options: RequestInit = {}) => {
+  if (!AIRTABLE_CONFIG.TOKEN || AIRTABLE_CONFIG.TOKEN.includes('HIER_EINTRAGEN')) {
+    console.warn("Airtable Token fehlt in constants.ts");
+    throw new Error("Bitte Airtable Token eintragen");
+  }
+
+  const url = `https://api.airtable.com/v0/${AIRTABLE_CONFIG.BASE_ID}/${tableName}`;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${AIRTABLE_CONFIG.TOKEN}`,
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: response.statusText }));
+    throw new Error(`Airtable Error: ${JSON.stringify(error)}`);
+  }
+  return response.json();
+};
+
 export const storageService = {
-  getDishes: (): Dish[] => {
+  _saveToLocal: (key: string, data: any) => localStorage.setItem(key, JSON.stringify(data)),
+  _readFromLocal: (key: string, fallback: any) => {
+    const s = localStorage.getItem(key);
     try {
-      const stored = localStorage.getItem(STORAGE_KEYS.DISHES);
-      if (!stored) {
-        localStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(INITIAL_DISHES));
-        return INITIAL_DISHES;
-      }
-      return JSON.parse(stored);
-    } catch (e) {
-      console.error("Fehler beim Lesen der Gerichte:", e);
-      return INITIAL_DISHES;
+      return s ? JSON.parse(s) : fallback;
+    } catch {
+      return fallback;
     }
   },
 
-  uploadToDrive: async (imageBase64: string, filename: string): Promise<string> => {
-    if (!DRIVE_PROXY_URL || !DRIVE_PROXY_URL.includes("macros/s/")) {
-       return imageBase64;
-    }
-
+  sync: async (): Promise<{ dishes: Dish[], votes: Vote[] }> => {
     try {
-      await fetch(DRIVE_PROXY_URL, {
-        method: 'POST',
-        mode: 'no-cors', 
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({
-          filename,
-          mimeType: 'image/jpeg',
-          imageBase64
-        })
-      });
-      return imageBase64; 
-    } catch (error) {
-      console.error('Drive Upload Fehler:', error);
-      return imageBase64;
+      const dishesData = await airtableFetch(AIRTABLE_CONFIG.TABLES.DISHES);
+      const remoteDishes: Dish[] = (dishesData.records || []).map((r: any) => ({
+        id: safeString(r.fields.id || r.id),
+        name: safeString(r.fields.name, "Unbekanntes Gericht"),
+        recipe: safeString(r.fields.recipe),
+        imageUrl: safeString(r.fields.imageUrl, `https://picsum.photos/seed/${r.id}/600/800`),
+        isCustom: !!r.fields.isCustom
+      }));
+
+      const votesData = await airtableFetch(AIRTABLE_CONFIG.TABLES.VOTES);
+      const remoteVotes: Vote[] = (votesData.records || []).map((r: any) => ({
+        userId: safeString(r.fields.userId),
+        dishId: safeString(r.fields.dishId),
+        liked: !!r.fields.liked,
+        timestamp: Number(r.fields.timestamp) || Date.now()
+      })).filter((v: any) => v.userId && v.dishId);
+
+      storageService._saveToLocal(STORAGE_KEYS.DISHES, remoteDishes);
+      storageService._saveToLocal(STORAGE_KEYS.VOTES, remoteVotes);
+
+      return { dishes: remoteDishes, votes: remoteVotes };
+    } catch (err) {
+      console.warn("Airtable Sync failed:", err);
+      return { 
+        dishes: storageService.getDishes(), 
+        votes: storageService.getVotes() 
+      };
     }
   },
+
+  getDishes: (): Dish[] => storageService._readFromLocal(STORAGE_KEYS.DISHES, INITIAL_DISHES),
 
   addDish: async (name: string, recipe?: string, imageBase64?: string): Promise<Dish> => {
-    const dishes = storageService.getDishes();
-    let finalImageUrl = `https://picsum.photos/seed/${encodeURIComponent(name)}/600/800`;
-    
+    let finalImageUrl = `https://picsum.photos/seed/${encodeURIComponent(name + Date.now())}/600/800`;
     if (imageBase64) {
-      const compressed = await compressImage(imageBase64);
-      storageService.uploadToDrive(compressed, `${Date.now()}_${name.replace(/\s/g, '_')}.jpg`);
-      finalImageUrl = compressed;
+      finalImageUrl = await compressImage(imageBase64);
     }
 
     const newDish: Dish = {
       id: Date.now().toString(),
-      name,
-      recipe,
+      name: safeString(name),
+      recipe: safeString(recipe),
       imageUrl: finalImageUrl,
       isCustom: true,
     };
-    
-    const updatedDishes = [newDish, ...dishes];
-    localStorage.setItem(STORAGE_KEYS.DISHES, JSON.stringify(updatedDishes));
+
+    const dishes = storageService.getDishes();
+    storageService._saveToLocal(STORAGE_KEYS.DISHES, [newDish, ...dishes]);
+
+    try {
+      await airtableFetch(AIRTABLE_CONFIG.TABLES.DISHES, {
+        method: 'POST',
+        body: JSON.stringify({
+          records: [{
+            fields: {
+              id: newDish.id,
+              name: newDish.name,
+              recipe: newDish.recipe || "",
+              imageUrl: newDish.imageUrl,
+              isCustom: true
+            }
+          }]
+        })
+      });
+    } catch (e) {
+      console.error("Airtable Add Dish failed:", e);
+    }
+
     return newDish;
   },
 
   getVotes: (): Vote[] => {
-    try {
-      const lastActiveStr = localStorage.getItem(STORAGE_KEYS.LAST_ACTIVE);
-      const now = Date.now();
-      
-      if (lastActiveStr) {
-        const lastActive = parseInt(lastActiveStr);
-        if (!isNaN(lastActive) && !isToday(lastActive)) {
-          localStorage.setItem(STORAGE_KEYS.VOTES, JSON.stringify([]));
-          localStorage.setItem(STORAGE_KEYS.LAST_ACTIVE, now.toString());
-          return [];
-        }
+    const votes = storageService._readFromLocal(STORAGE_KEYS.VOTES, []);
+    const lastActiveStr = localStorage.getItem(STORAGE_KEYS.LAST_ACTIVE);
+    const now = Date.now();
+    
+    if (lastActiveStr) {
+      const lastActive = parseInt(lastActiveStr);
+      if (!isNaN(lastActive) && !isToday(lastActive)) {
+        storageService._saveToLocal(STORAGE_KEYS.VOTES, []);
+        localStorage.setItem(STORAGE_KEYS.LAST_ACTIVE, now.toString());
+        return [];
       }
-      
-      localStorage.setItem(STORAGE_KEYS.LAST_ACTIVE, now.toString());
-      const stored = localStorage.getItem(STORAGE_KEYS.VOTES);
-      return stored ? JSON.parse(stored) : [];
-    } catch (e) {
-      return [];
     }
+    localStorage.setItem(STORAGE_KEYS.LAST_ACTIVE, now.toString());
+    return votes;
   },
 
-  castVote: (userId: string, dishId: string, liked: boolean) => {
+  castVote: async (userId: string, dishId: string, liked: boolean) => {
+    const votes = storageService.getVotes();
+    const newVote: Vote = { 
+      userId: safeString(userId), 
+      dishId: safeString(dishId), 
+      liked, 
+      timestamp: Date.now() 
+    };
+    const updatedVotes = [...votes.filter(v => !(v.userId === userId && v.dishId === dishId)), newVote];
+    
+    storageService._saveToLocal(STORAGE_KEYS.VOTES, updatedVotes);
+
     try {
-      const votes = storageService.getVotes();
-      const filtered = votes.filter(v => !(v.userId === userId && v.dishId === dishId));
-      const newVote: Vote = { userId, dishId, liked, timestamp: Date.now() };
-      localStorage.setItem(STORAGE_KEYS.VOTES, JSON.stringify([...filtered, newVote]));
-    } catch (e) {}
+      await airtableFetch(AIRTABLE_CONFIG.TABLES.VOTES, {
+        method: 'POST',
+        body: JSON.stringify({
+          records: [{
+            fields: {
+              userId: newVote.userId,
+              dishId: newVote.dishId,
+              liked: newVote.liked,
+              timestamp: newVote.timestamp
+            }
+          }]
+        })
+      });
+    } catch (e) {
+      console.error("Airtable Vote failed:", e);
+    }
   },
 
   checkForMatch: (dishId: string): boolean => {
@@ -140,11 +216,5 @@ export const storageService = {
     const votes = storageService.getVotes();
     const userVotedDishIds = new Set(votes.filter(v => v.userId === userId).map(v => v.dishId));
     return allDishes.filter(d => !userVotedDishIds.has(d.id));
-  },
-
-  resetUserVotes: (userId: string) => {
-    const votes = storageService.getVotes();
-    const updatedVotes = votes.filter(v => v.userId !== userId);
-    localStorage.setItem(STORAGE_KEYS.VOTES, JSON.stringify(updatedVotes));
   }
 };
