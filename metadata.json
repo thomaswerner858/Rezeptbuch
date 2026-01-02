@@ -1,0 +1,7 @@
+{
+  "name": "Dinner Swipe Match",
+  "description": "A Tinder-style mobile web app for couples to decide on dinner. Swipe right to like, left to pass, and get matched when both partners agree.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
