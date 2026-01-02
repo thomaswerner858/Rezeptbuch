@@ -16,7 +16,9 @@ export const STORAGE_KEYS = {
 
 export const AIRTABLE_CONFIG = {
   BASE_ID: 'apprpI3Y3hphyJ0t4', 
-  TOKEN: 'DEIN_AIRTABLE_TOKEN_HIER_EINTRAGEN',
+  // HIER MUSS DEIN PERSÖNLICHER AIRTABLE TOKEN REIN!
+  // Ohne diesen Token kann Marie Thomas keine Rezepte schicken.
+  TOKEN: 'DEIN_AIRTABLE_TOKEN_HIER_EINTRAGEN', 
   TABLES: {
     DISHES: 'Dishes',
     VOTES: 'Votes'
@@ -25,7 +27,6 @@ export const AIRTABLE_CONFIG = {
 
 /**
  * Google Apps Script Konfiguration
- * Ermöglicht den Upload ohne individuellen Nutzer-Login.
  */
 export const GOOGLE_CONFIG = {
   GAS_URL: 'https://script.google.com/macros/s/AKfycbxwDaozIoUyJAn8HgJWoeC8jtVippvj4KDt9sLj6bYuAEYYLXifXqn2XT6YMR9Ank3i/exec',

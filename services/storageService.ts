@@ -22,37 +22,54 @@ const safeString = (val: any, fallback: string = ''): string => {
 
 /**
  * Upload via Google Apps Script
- * Schickt das Bild an dein Skript und versucht die öffentliche URL zu erhalten.
  */
 const uploadToGoogleDrive = async (name: string, base64Image: string): Promise<string> => {
+  console.log("Starte Upload zu Google Drive für:", name);
   try {
+    const base64Data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
+    
+    const payload = {
+      filename: `${name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${Date.now()}.jpg`,
+      mimeType: 'image/jpeg',
+      data: base64Data
+    };
+
+    // Wir nutzen 'text/plain' um den CORS Preflight zu umgehen, 
+    // da Google Apps Script keine OPTIONS-Requests für 'application/json' mag.
     const response = await fetch(GOOGLE_CONFIG.GAS_URL, {
       method: 'POST',
-      mode: 'cors', // Wir brauchen die Antwort-URL!
+      mode: 'cors', 
       headers: {
-        'Content-Type': 'text/plain;charset=utf-8', // GAS kommt oft besser mit text/plain klar
+        'Content-Type': 'text/plain;charset=utf-8',
       },
-      body: JSON.stringify({
-        filename: `${name.replace(/\s+/g, '_')}_${Date.now()}.jpg`,
-        mimeType: 'image/jpeg',
-        data: base64Image.split(',')[1]
-      }),
+      body: JSON.stringify(payload),
     });
     
+    if (!response.ok) {
+      throw new Error(`HTTP Fehler! Status: ${response.status}`);
+    }
+
     const result = await response.json();
-    console.log("GAS Response:", result);
-    // Dein Script sollte ein Objekt wie { "url": "..." } zurückgeben
-    return result.url || result.link || base64Image;
+    console.log("Google Apps Script Antwort:", result);
+    
+    if (result.url) {
+      return result.url;
+    } else if (result.error) {
+      throw new Error(`Script Fehler: ${result.error}`);
+    }
+    
+    throw new Error("Keine URL in der Antwort gefunden");
   } catch (e) {
-    console.warn("GAS Upload Error (evtl. CORS?):", e);
-    // Fallback: Wenn wir die URL nicht lesen können, nutzen wir das Base64 (lokal sichtbar)
-    return base64Image; 
+    console.error("Detaillierter Upload-Fehler:", e);
+    // Wenn der Upload fehlschlägt, nutzen wir ein Platzhalterbild
+    // WICHTIG: Kein Base64 in Airtable speichern (zu groß!)
+    return `https://picsum.photos/seed/${encodeURIComponent(name)}/600/800`;
   }
 };
 
 const airtableFetch = async (tableName: string, options: RequestInit = {}) => {
   if (!AIRTABLE_CONFIG.TOKEN || AIRTABLE_CONFIG.TOKEN.includes('HIER_EINTRAGEN')) {
-    console.warn("Airtable Token fehlt! Daten werden nur lokal gespeichert.");
+    console.warn("Airtable Sync deaktiviert: Kein Token gefunden.");
     return { records: [] };
   }
 
@@ -68,7 +85,7 @@ const airtableFetch = async (tableName: string, options: RequestInit = {}) => {
   
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(`Airtable Error: ${error.error?.message || response.statusText}`);
+    throw new Error(`Airtable API Error: ${JSON.stringify(error)}`);
   }
   
   return response.json();
@@ -89,14 +106,14 @@ export const storageService = {
         name: safeString(r.fields.name, "Unbekanntes Gericht"),
         recipe: safeString(r.fields.recipe),
         imageUrl: safeString(r.fields.imageUrl, `https://picsum.photos/seed/${r.id}/600/800`),
-        isCustom: r.fields.isCustom === "true" || r.fields.isCustom === true
+        isCustom: r.fields.isCustom === true || r.fields.isCustom === "true"
       })).reverse();
 
       const votesData = await airtableFetch(AIRTABLE_CONFIG.TABLES.VOTES);
       const remoteVotes: Vote[] = (votesData.records || []).map((r: any) => ({
         userId: safeString(r.fields.userId),
         dishId: safeString(r.fields.dishId),
-        liked: r.fields.liked === "true" || r.fields.liked === true,
+        liked: r.fields.liked === true || r.fields.liked === "true",
         timestamp: Number(r.fields.timestamp) || Date.now()
       })).filter((v: any) => v.userId && v.dishId);
 
@@ -105,7 +122,7 @@ export const storageService = {
 
       return { dishes: remoteDishes, votes: remoteVotes };
     } catch (err) {
-      console.error("Sync failed:", err);
+      console.error("Sync fehlgeschlagen:", err);
       return { dishes: storageService.getDishes(), votes: storageService.getVotes() };
     }
   },
@@ -116,7 +133,6 @@ export const storageService = {
     let finalImageUrl = `https://picsum.photos/seed/${encodeURIComponent(name + Date.now())}/600/800`;
     
     if (imageBase64) {
-      // 1. Bild zu Google Drive hochladen und echte URL holen
       finalImageUrl = await uploadToGoogleDrive(name, imageBase64);
     }
 
@@ -128,7 +144,6 @@ export const storageService = {
       isCustom: true,
     };
 
-    // 2. An Airtable senden für den Partner
     try {
       await airtableFetch(AIRTABLE_CONFIG.TABLES.DISHES, {
         method: 'POST',
@@ -139,17 +154,16 @@ export const storageService = {
               name: newDish.name,
               recipe: newDish.recipe || "",
               imageUrl: newDish.imageUrl,
-              isCustom: true // Als boolean senden
+              isCustom: true
             }
           }]
         })
       });
-      console.log("Erfolgreich an Airtable gesendet");
+      console.log("Airtable Update erfolgreich.");
     } catch (e) {
-      console.error("Airtable Upload fehlgeschlagen:", e);
+      console.error("Airtable Fehler beim Hinzufügen:", e);
     }
 
-    // 3. Lokal hinzufügen
     const dishes = storageService.getDishes();
     storageService._saveToLocal(STORAGE_KEYS.DISHES, [newDish, ...dishes]);
 
